@@ -210,7 +210,7 @@ button:disabled {
     
     .chat-container {
         grid-column: 2;
-        height: auto;
+        height: 400px;
     }
 }
 

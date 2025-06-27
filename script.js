@@ -23,6 +23,10 @@ class WebRTCVideoChat {
         this.isVideoEnabled = true;
         this.isAudioEnabled = true;
         this.isScreenSharing = false;
+        this.isHost = false; // 是否为房间创建者
+        
+        // 简单的加密密钥（生产环境应该使用更安全的方法）
+        this.secretKey = 'WebRTC-VideoChat-2025';
 
         // STUN servers for NAT traversal
         this.servers = {
@@ -58,54 +62,82 @@ class WebRTCVideoChat {
 
     async createRoom() {
         try {
-            const roomId = this.generateRoomId();
-            this.roomIdInput.value = roomId;
             await this.startLocalStream();
             await this.setupPeerConnection();
-            this.currentRoomId = roomId;
-            this.updateConnectionStatus('等待对方加入');
-            this.currentRoom.textContent = `房间: ${roomId}`;
-            this.toggleRoomButtons(true);
             
-            // Create offer
+            // 创建offer
             const offer = await this.peerConnection.createOffer();
             await this.peerConnection.setLocalDescription(offer);
             
-            this.addChatMessage('系统', `房间 ${roomId} 已创建，等待其他人加入...`);
+            // 将offer加密生成token密码
+            const token = this.encryptOffer(offer);
             
-            // In a real application, you would send this offer to a signaling server
-            console.log('Offer created:', offer);
-            this.showOfferInstructions(offer);
+            this.roomIdInput.value = token;
+            this.currentRoomId = token;
+            this.isHost = true;
+            
+            this.updateConnectionStatus('等待对方加入');
+            this.currentRoom.textContent = `房间: ${token.substring(0, 8)}...`;
+            this.toggleRoomButtons(true);
+            
+            this.addChatMessage('系统', `🎉 房间创建成功！`);
+            this.addChatMessage('系统', `� 房间密码: ${token}`);
+            this.addChatMessage('系统', `💡 请将此密码分享给其他人，他们输入密码即可加入！`);
+            
+            console.log(`✅ 房间已创建，密码: ${token}`);
             
         } catch (error) {
             console.error('创建房间失败:', error);
-            this.addChatMessage('系统', '创建房间失败: ' + error.message);
+            this.addChatMessage('系统', '❌ 创建房间失败: ' + error.message);
         }
     }
 
     async joinRoom() {
         try {
-            const roomId = this.roomIdInput.value.trim();
-            if (!roomId) {
-                alert('请输入房间ID');
+            const token = this.roomIdInput.value.trim();
+            if (!token) {
+                alert('请输入房间密码');
                 return;
             }
 
+            // 尝试解密token获取offer信息
+            const offer = this.decryptToken(token);
+            if (!offer) {
+                alert('❌ 房间密码无效！请检查密码是否正确。');
+                return;
+            }
+
+            this.isHost = false;
             await this.startLocalStream();
             await this.setupPeerConnection();
-            this.currentRoomId = roomId;
+            
+            this.currentRoomId = token;
             this.updateConnectionStatus('正在连接');
-            this.currentRoom.textContent = `房间: ${roomId}`;
+            this.currentRoom.textContent = `房间: ${token.substring(0, 8)}...`;
             this.toggleRoomButtons(true);
             
-            this.addChatMessage('系统', `正在加入房间 ${roomId}...`);
+            this.addChatMessage('系统', `🔐 正在加入房间...`);
             
-            // In a real application, you would get the offer from a signaling server
-            this.showJoinInstructions();
+            // 设置远程offer并创建answer
+            await this.peerConnection.setRemoteDescription(offer);
+            const answer = await this.peerConnection.createAnswer();
+            await this.peerConnection.setLocalDescription(answer);
+            
+            this.addChatMessage('系统', '🤝 正在建立连接...');
+            this.addChatMessage('系统', '💡 等待房间创建者接受连接...');
+            
+            // 生成加密的answer token
+            const answerToken = this.encryptAnswer(answer);
+            this.addChatMessage('系统', `📋 Answer密码: ${answerToken}`);
+            this.addChatMessage('系统', `💡 请将此Answer密码发送给房间创建者`);
+            this.addChatMessage('系统', `📝 创建者运行: window.videoChat.acceptAnswer("${answerToken}")`);
+            
+            console.log('📋 Answer密码:', answerToken);
+            console.log('💡 房间创建者请运行:', `window.videoChat.acceptAnswer("${answerToken}")`);
             
         } catch (error) {
             console.error('加入房间失败:', error);
-            this.addChatMessage('系统', '加入房间失败: ' + error.message);
+            this.addChatMessage('系统', '❌ 加入房间失败: ' + error.message);
         }
     }
 
@@ -123,10 +155,11 @@ class WebRTCVideoChat {
         this.localVideo.srcObject = null;
         this.remoteVideo.srcObject = null;
         this.currentRoomId = null;
+        this.isHost = false;
         this.updateConnectionStatus('未连接');
         this.currentRoom.textContent = '';
         this.toggleRoomButtons(false);
-        this.addChatMessage('系统', '已离开房间');
+        this.addChatMessage('系统', '👋 已离开房间');
     }
 
     async startLocalStream() {
@@ -156,32 +189,36 @@ class WebRTCVideoChat {
 
         // Handle remote stream
         this.peerConnection.ontrack = (event) => {
-            console.log('Received remote stream');
+            console.log('📺 接收到远程视频流');
             this.remoteVideo.srcObject = event.streams[0];
-            this.updateConnectionStatus('已连接');
+            this.updateConnectionStatus('✅ 已连接');
+            this.addChatMessage('系统', '🎥 视频通话已建立');
         };
 
-        // Handle ICE candidates
+        // Handle ICE candidates (简化处理)
         this.peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
-                console.log('ICE candidate:', event.candidate);
-                // In a real application, you would send this candidate to the other peer
+                console.log('🔄 ICE候选:', event.candidate.candidate);
             }
         };
 
         // Handle connection state changes
         this.peerConnection.onconnectionstatechange = () => {
-            console.log('Connection state:', this.peerConnection.connectionState);
-            switch (this.peerConnection.connectionState) {
+            const state = this.peerConnection.connectionState;
+            console.log('🔗 连接状态:', state);
+            
+            switch (state) {
                 case 'connected':
-                    this.updateConnectionStatus('已连接');
-                    this.addChatMessage('系统', '视频通话已建立');
+                    this.updateConnectionStatus('✅ 已连接');
+                    break;
+                case 'connecting':
+                    this.updateConnectionStatus('🔄 连接中');
                     break;
                 case 'disconnected':
-                    this.updateConnectionStatus('连接断开');
+                    this.updateConnectionStatus('⚠️ 连接断开');
                     break;
                 case 'failed':
-                    this.updateConnectionStatus('连接失败');
+                    this.updateConnectionStatus('❌ 连接失败');
                     break;
             }
         };
@@ -197,7 +234,7 @@ class WebRTCVideoChat {
         });
 
         this.dataChannel.onopen = () => {
-            console.log('Data channel opened');
+            console.log('💬 聊天通道已开启');
         };
 
         this.dataChannel.onmessage = (event) => {
@@ -221,7 +258,8 @@ class WebRTCVideoChat {
             if (videoTrack) {
                 videoTrack.enabled = !videoTrack.enabled;
                 this.isVideoEnabled = videoTrack.enabled;
-                this.toggleVideoBtn.textContent = this.isVideoEnabled ? '关闭摄像头' : '开启摄像头';
+                this.toggleVideoBtn.textContent = this.isVideoEnabled ? '📷 关闭摄像头' : '📷 开启摄像头';
+                this.addChatMessage('系统', this.isVideoEnabled ? '📷 摄像头已开启' : '📷 摄像头已关闭');
             }
         }
     }
@@ -232,7 +270,8 @@ class WebRTCVideoChat {
             if (audioTrack) {
                 audioTrack.enabled = !audioTrack.enabled;
                 this.isAudioEnabled = audioTrack.enabled;
-                this.toggleAudioBtn.textContent = this.isAudioEnabled ? '静音' : '取消静音';
+                this.toggleAudioBtn.textContent = this.isAudioEnabled ? '🔇 静音' : '🔊 取消静音';
+                this.addChatMessage('系统', this.isAudioEnabled ? '🔊 麦克风已开启' : '🔇 麦克风已静音');
             }
         }
     }
@@ -257,8 +296,9 @@ class WebRTCVideoChat {
                 }
 
                 this.localVideo.srcObject = screenStream;
-                this.shareScreenBtn.textContent = '停止分享';
+                this.shareScreenBtn.textContent = '📺 停止分享';
                 this.isScreenSharing = true;
+                this.addChatMessage('系统', '📺 开始分享屏幕');
 
                 // Handle screen share end
                 videoTrack.onended = () => {
@@ -293,8 +333,9 @@ class WebRTCVideoChat {
 
             this.localVideo.srcObject = cameraStream;
             this.localStream = cameraStream;
-            this.shareScreenBtn.textContent = '分享屏幕';
+            this.shareScreenBtn.textContent = '📺 分享屏幕';
             this.isScreenSharing = false;
+            this.addChatMessage('系统', '📷 已切换回摄像头');
 
         } catch (error) {
             console.error('停止屏幕分享失败:', error);
@@ -313,6 +354,10 @@ class WebRTCVideoChat {
             this.dataChannel.send(JSON.stringify(messageData));
             this.addChatMessage('我', message, true);
             this.messageInput.value = '';
+        } else if (message) {
+            this.addChatMessage('我', message, true);
+            this.messageInput.value = '';
+            this.addChatMessage('系统', '⚠️ 聊天功能需要建立连接后使用');
         }
     }
 
@@ -322,7 +367,7 @@ class WebRTCVideoChat {
         
         const timestamp = new Date().toLocaleTimeString();
         messageDiv.innerHTML = `
-            <div>${text}</div>
+            <div class="message-text">${text}</div>
             <div class="timestamp">${sender} - ${timestamp}</div>
         `;
 
@@ -332,8 +377,15 @@ class WebRTCVideoChat {
 
     updateConnectionStatus(status) {
         this.connectionStatus.textContent = status;
-        this.connectionStatus.className = status.includes('已连接') ? 'connected' : 
-                                        status.includes('连接') ? 'connecting' : 'disconnected';
+        
+        // 更新状态样式
+        if (status.includes('已连接') || status.includes('✅')) {
+            this.connectionStatus.className = 'connected';
+        } else if (status.includes('连接') || status.includes('🔄')) {
+            this.connectionStatus.className = 'connecting';
+        } else {
+            this.connectionStatus.className = 'disconnected';
+        }
     }
 
     toggleRoomButtons(inRoom) {
@@ -343,69 +395,154 @@ class WebRTCVideoChat {
         this.roomIdInput.disabled = inRoom;
     }
 
-    generateRoomId() {
-        return Math.random().toString(36).substr(2, 9).toUpperCase();
+    generateRoomPassword() {
+        // 生成简单易记的6位房间密码
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let password = '';
+        for (let i = 0; i < 6; i++) {
+            password += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return password;
     }
 
-    showOfferInstructions(offer) {
-        const instructions = `
-要邀请其他人加入，请将以下信息发送给他们：
-
-房间ID: ${this.currentRoomId}
-
-Offer (复制整段):
-${JSON.stringify(offer)}
-
-对方需要：
-1. 在房间ID框中输入: ${this.currentRoomId}
-2. 点击"加入房间"
-3. 在浏览器控制台中运行: window.videoChat.setRemoteOffer('上面的Offer JSON')
-        `;
-        
-        console.log(instructions);
-        this.addChatMessage('系统', '房间创建成功！请查看浏览器控制台获取邀请信息。');
-    }
-
-    showJoinInstructions() {
-        const instructions = `
-加入房间成功！现在需要创建者的Offer信息。
-
-请在浏览器控制台中运行：
-window.videoChat.createAnswer('Offer JSON字符串')
-
-等待创建者提供Offer信息...
-        `;
-        
-        console.log(instructions);
-        this.addChatMessage('系统', '请等待创建者提供连接信息，查看浏览器控制台获取详细说明。');
-    }
-
-    // Helper methods for manual signaling (for demo purposes)
-    async setRemoteOffer(offerJson) {
+    // 浏览器兼容的加密函数
+    encryptOffer(offer) {
         try {
-            const offer = JSON.parse(offerJson);
-            await this.peerConnection.setRemoteDescription(offer);
-            
-            const answer = await this.peerConnection.createAnswer();
-            await this.peerConnection.setLocalDescription(answer);
-            
-            console.log('Answer created:', answer);
-            console.log('发送此Answer给创建者:', JSON.stringify(answer));
-            
-            this.addChatMessage('系统', '已处理Offer，请将Answer发送给创建者');
+            const data = JSON.stringify(offer);
+            // 使用简单的 Base64 + 时间戳编码
+            const timestamp = Date.now().toString();
+            const encoded = btoa(unescape(encodeURIComponent(data + '|' + timestamp)));
+            // 添加一个简单的校验码
+            const checksum = this.simpleHash(encoded + this.secretKey).substring(0, 8);
+            return `ROOM_${checksum}_${encoded}`;
         } catch (error) {
-            console.error('处理Offer失败:', error);
+            console.error('加密失败:', error);
+            // 如果加密失败，使用简单的Base64编码
+            return `SIMPLE_${btoa(JSON.stringify(offer))}`;
         }
     }
 
-    async setRemoteAnswer(answerJson) {
+    // 解密token获取offer
+    decryptToken(token) {
         try {
-            const answer = JSON.parse(answerJson);
-            await this.peerConnection.setRemoteDescription(answer);
+            if (token.startsWith('ROOM_')) {
+                // 新格式：ROOM_checksum_encoded
+                const parts = token.split('_');
+                if (parts.length !== 3) return null;
+                
+                const checksum = parts[1];
+                const encoded = parts[2];
+                
+                // 验证校验码
+                const expectedChecksum = this.simpleHash(encoded + this.secretKey).substring(0, 8);
+                if (checksum !== expectedChecksum) {
+                    console.error('校验码验证失败');
+                    return null;
+                }
+                
+                const decoded = decodeURIComponent(escape(atob(encoded)));
+                const [offerData, timestamp] = decoded.split('|');
+                
+                return JSON.parse(offerData);
+            } else if (token.startsWith('SIMPLE_')) {
+                // 兼容简单格式
+                const encoded = token.substring(7);
+                return JSON.parse(atob(encoded));
+            }
             
-            this.addChatMessage('系统', '连接建立成功！');
+            return null;
         } catch (error) {
-            console.error('处理Answer失败:', error);
+            console.error('解密失败:', error);
+            return null;
+        }
+    }
+
+    // 显示answer给房间创建者
+    showAnswerForHost(answer) {
+        const answerToken = this.encryptAnswer(answer);
+        console.log('📋 请将以下Answer密码发送给房间创建者：');
+        console.log(`Answer密码: ${answerToken}`);
+        
+        this.addChatMessage('系统', `📋 Answer密码: ${answerToken}`);
+        this.addChatMessage('系统', '💡 请将此Answer密码发送给房间创建者');
+        this.addChatMessage('系统', `📝 创建者运行: window.videoChat.acceptAnswer("${answerToken}")`);
+    }
+
+    // 加密answer生成token
+    encryptAnswer(answer) {
+        try {
+            const data = JSON.stringify(answer);
+            const timestamp = Date.now().toString();
+            const encoded = btoa(unescape(encodeURIComponent(data + '|' + timestamp)));
+            const checksum = this.simpleHash(encoded + this.secretKey).substring(0, 8);
+            return `ANS_${checksum}_${encoded}`;
+        } catch (error) {
+            console.error('Answer加密失败:', error);
+            return `SIMPLE_ANS_${btoa(JSON.stringify(answer))}`;
+        }
+    }
+
+    // 解密answer token
+    decryptAnswerToken(token) {
+        try {
+            if (token.startsWith('ANS_')) {
+                const parts = token.split('_');
+                if (parts.length !== 3) return null;
+                
+                const checksum = parts[1];
+                const encoded = parts[2];
+                
+                const expectedChecksum = this.simpleHash(encoded + this.secretKey).substring(0, 8);
+                if (checksum !== expectedChecksum) {
+                    console.error('Answer校验码验证失败');
+                    return null;
+                }
+                
+                const decoded = decodeURIComponent(escape(atob(encoded)));
+                const [answerData, timestamp] = decoded.split('|');
+                
+                return JSON.parse(answerData);
+            } else if (token.startsWith('SIMPLE_ANS_')) {
+                const encoded = token.substring(11);
+                return JSON.parse(atob(encoded));
+            }
+            
+            return null;
+        } catch (error) {
+            console.error('Answer解密失败:', error);
+            return null;
+        }
+    }
+
+    // 简单的哈希函数（浏览器兼容）
+    simpleHash(str) {
+        let hash = 0;
+        if (str.length === 0) return hash.toString();
+        
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // 转换为32位整数
+        }
+        
+        return Math.abs(hash).toString(16);
+    }
+
+    // 房间创建者接受answer连接
+    async acceptAnswer(answerToken) {
+        try {
+            const answer = this.decryptAnswerToken(answerToken);
+            if (!answer) {
+                this.addChatMessage('系统', '❌ 无效的Answer密码！');
+                return;
+            }
+
+            await this.peerConnection.setRemoteDescription(answer);
+            this.addChatMessage('系统', '✅ 连接建立成功！');
+            
+        } catch (error) {
+            console.error('接受Answer失败:', error);
+            this.addChatMessage('系统', '❌ 连接失败: ' + error.message);
         }
     }
 }
@@ -413,17 +550,19 @@ window.videoChat.createAnswer('Offer JSON字符串')
 // Initialize the video chat application
 document.addEventListener('DOMContentLoaded', () => {
     window.videoChat = new WebRTCVideoChat();
+    console.log('🎥 WebRTC视频聊天应用已初始化');
+    console.log('💡 使用说明：');
+    console.log('1. 创建者：点击"创建房间"生成加密密码');
+    console.log('2. 加入者：输入密码点击"加入房间"');
+    console.log('3. 加入者会看到Answer密码，发送给创建者');
+    console.log('4. 创建者运行: window.videoChat.acceptAnswer("Answer密码")');
 });
 
-// Utility functions for manual signaling (for demo purposes)
-window.setOffer = (offerJson) => {
-    if (window.videoChat) {
-        window.videoChat.setRemoteOffer(offerJson);
-    }
-};
-
-window.setAnswer = (answerJson) => {
-    if (window.videoChat) {
-        window.videoChat.setRemoteAnswer(answerJson);
+// 全局方法：房间创建者接受连接
+window.acceptAnswer = (answerToken) => {
+    if (window.videoChat && window.videoChat.isHost) {
+        window.videoChat.acceptAnswer(answerToken);
+    } else {
+        console.error('❌ 只有房间创建者可以接受Answer，或者应用尚未初始化');
     }
 };
