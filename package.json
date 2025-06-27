@@ -1,0 +1,30 @@
+{
+  "name": "webrtc-video-chat",
+  "version": "1.0.0",
+  "description": "基于WebRTC的实时视频聊天应用",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve .",
+    "build": "vite build",
+    "dev": "npx live-server .",
+    "serve": "http-server -p 8000",
+    "deploy": "gh-pages -d dist"
+  },
+  "keywords": [
+    "webrtc",
+    "video-chat",
+    "real-time",
+    "peer-to-peer",
+    "javascript"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "gh-pages": "^6.3.0",
+    "live-server": "^1.2.2",
+    "serve": "^14.2.1"
+  },
+  "dependencies": {
+    "vite": "^7.0.0"
+  }
+}

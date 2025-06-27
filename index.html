@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC 视频聊天</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>WebRTC 视频聊天</h1>
+        </header>
+        
+        <div class="main-content">
+            <!-- 控制面板 -->
+            <div class="control-panel">
+                <div class="room-controls">
+                    <input type="text" id="roomId" placeholder="输入房间ID" />
+                    <button id="createRoom">创建房间</button>
+                    <button id="joinRoom">加入房间</button>
+                    <button id="leaveRoom" disabled>离开房间</button>
+                </div>
+                
+                <div class="media-controls">
+                    <button id="toggleVideo">关闭摄像头</button>
+                    <button id="toggleAudio">静音</button>
+                    <button id="shareScreen">分享屏幕</button>
+                </div>
+                
+                <div class="status">
+                    <span id="connectionStatus">未连接</span>
+                    <span id="currentRoom"></span>
+                </div>
+            </div>
+            
+            <!-- 视频区域 -->
+            <div class="video-container">
+                <div class="video-wrapper">
+                    <video id="localVideo" autoplay muted playsinline></video>
+                    <div class="video-label">本地视频</div>
+                </div>
+                
+                <div class="video-wrapper">
+                    <video id="remoteVideo" autoplay playsinline></video>
+                    <div class="video-label">远程视频</div>
+                </div>
+            </div>
+            
+            <!-- 聊天区域 -->
+            <div class="chat-container">
+                <div class="chat-messages" id="chatMessages"></div>
+                <div class="chat-input">
+                    <input type="text" id="messageInput" placeholder="输入消息..." />
+                    <button id="sendMessage">发送</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js" type="module"></script>
+</body>
+</html>
